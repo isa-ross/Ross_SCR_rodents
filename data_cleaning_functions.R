@@ -79,4 +79,3 @@ check_missing_data = function(df,fields) {
   }
   return(as.numeric(row.names(missing))+1)
 }
-
