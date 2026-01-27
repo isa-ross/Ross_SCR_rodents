@@ -50,10 +50,15 @@ ggplot(richness_by_site_season, aes(x = site, y = n)) +
 ## abundance by site & season
 sp_abund <- sp_richness %>% filter(is.na(recap)) #remove recaps
 sp_abund$period <- paste(sp_abund$season, sp_abund$yr, sep = " ")
-abund_by_site_period <- sp_abund %>% group_by(period, site, species) %>% distinct(species) 
+abund_by_site_period <-  sp_abund %>%
+  count(site, period, species, name = "n")  # is this correct??
 
+abund_by_site_period <- abund_by_site_period %>% mutate(total = sum(unique_combos$n))
 
+## plot
 abund_by_site_period <- abund_by_site_period %>% mutate(total = sum(abund_by_site_period$n_species))
 
-ggplot(abund_by_site_period, aes(x=period, y=n_species))+
-  geom_col(aes(fill = ))
+ggplot(unique_combos, aes(x=period, y=n))+
+  geom_col(aes(fill = species), position = "stack")+
+  facet_wrap(~site)
+  
