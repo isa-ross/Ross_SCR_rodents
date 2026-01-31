@@ -43,6 +43,9 @@ richness_by_site_season <- sp_richness %>%
 # try to switch seasons to chronological (spring -> fall)
 richness_by_site_season$season <- as_factor(richness_by_site_season$season)
 
+richness_by_site_season <- richness_by_site_season %>% 
+  mutate(season = factor(season, levels = c("Spring", "Fall")))
+
 ggplot(richness_by_site_season, aes(x = site, y = n)) +
   geom_col() +
   facet_grid(yr ~ season)
@@ -51,14 +54,17 @@ ggplot(richness_by_site_season, aes(x = site, y = n)) +
 sp_abund <- sp_richness %>% filter(is.na(recap)) #remove recaps
 sp_abund$period <- paste(sp_abund$season, sp_abund$yr, sep = " ")
 abund_by_site_period <-  sp_abund %>%
-  count(site, period, species, name = "n")  # is this correct??
-
-abund_by_site_period <- abund_by_site_period %>% mutate(total = sum(unique_combos$n))
-
+  count(site, yr, season, species, name = "n") %>%   # is this correct??
+  mutate(season = factor(season, levels = c("Spring", "Fall")))
 ## plot
 abund_by_site_period <- abund_by_site_period %>% mutate(total = sum(abund_by_site_period$n_species))
 
-ggplot(unique_combos, aes(x=period, y=n))+
+ggplot(abund_by_site_period, aes(x=as.factor(yr), y=n))+
   geom_col(aes(fill = species), position = "stack")+
-  facet_wrap(~site)
+  facet_grid(season~site) +
+  theme_bw()+
+  scale_fill_viridis_d()
+
+ggsave("outputs/site_season_abund.png", width=4, height=4)
+
   
