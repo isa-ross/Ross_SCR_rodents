@@ -63,8 +63,9 @@ ggplot(abund_by_site_period, aes(x=as.factor(yr), y=n))+
   geom_col(aes(fill = species), position = "stack")+
   facet_grid(season~site) +
   theme_bw()+
-  scale_fill_viridis_d()
+  scale_fill_viridis_d()+
+  labs(x = "Number of Individuals", y = "Year", title = "Community Composition by Site and Season")
 
-ggsave("outputs/site_season_abund.png", width=4, height=4)
+ggsave("outputs/site_season_abund.png", width=6, height=4)
 
   
