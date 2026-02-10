@@ -12,7 +12,9 @@ compare_worksheets(excel_file)
   # see commented-out code below if you want to walk through step by step
   # I had to run the function line-by-line to pinpoint the initial error
 
+veg <- "data_cleaning/veg_double.xlsx"
 
+compare_worksheets(veg)
 
 # ## Bring in code from Portal data cleaning functions
 # 
