@@ -64,5 +64,5 @@ veg_per_trap <- left_join(trap_by_species, veg, by = c("site", "trap"))
 
 cor(veg_per_capture[4:12])
 
-mblogit(species ~ grass_short + site, random = ~1 | trap, data = veg_per_capture)
+mblogit(species ~ grass_short + scrub_short + bare + site, random = ~1 | trap, data = veg_per_capture)
 
