@@ -60,6 +60,8 @@ per_trap <- inner_join(veg_per_capture, trap_by_species, by = c("site","trap"))
 
 veg_per_trap <- left_join(trap_by_species, veg, by = c("site", "trap"))
 
+# write.csv(veg_per_trap, "veg_per_trap.csv")
+
 # attempted models
 
 cor(veg_per_capture[4:12])
