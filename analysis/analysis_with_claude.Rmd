@@ -378,6 +378,7 @@ legend("topright",
 
 ### 8B. `ggplot2`
 
+Ordination plot using ggplot2 with one point per species per site. The `stat_ellipse()` function is the sources of the "probable convergence failure" errors.
 ```{r}
 # ggplot2 ordination plot
 rda_sites   <- as.data.frame(scores(rda_mod, display = "sites",   scaling = 2))
@@ -406,8 +407,10 @@ ggplot() +
        x = paste0("RDA1 (", rda_var[1], "%)"),
        y = paste0("RDA2 (", rda_var[2], "%)"), color = "Site") +
   coord_equal() + theme_bw(base_size = 12)
+```
 
-
+Same plot but with one point per trap instead. This removes the "probably convergence failure" warnings from the 
+```{r}
 # To show all traps (might avoid centroid calculation issues--"probable convergence failure")
 rda_sites   <- as.data.frame(scores(rda_mod, display = "lc",   scaling = 2))
 rda_sites$site      <- trap_meta$site
@@ -434,13 +437,15 @@ ggplot() +
 
 ## 9. Run Generalized Linear Models
 
-###. 9A. GLMM for Abundance Data
+### 9A. GLMM for Abundance Data
 
 ```{r}
 counts_per_trap <- rodents_first %>%
   group_by(site, trap, species, VegPC1, VegPC2, VegPC3) %>%
   summarise(count = n(), .groups = "drop")
 
+# expand the data frame to have a row for every combination of site, trap, and species
+# then join with veg PCs and counts by species per trap
 all_trap_species <- expand.grid(site = unique(veg$site),
                                 trap = unique(veg$trap), 
                                 species = unique(rodents$species),
@@ -451,15 +456,22 @@ all_trap_species <- expand.grid(site = unique(veg$site),
   mutate(count = ifelse(is.na(count), 0, count)) %>%
   arrange(species, site, trap)
 
+# create lists for for loop and results of glmm per species
 species_list  <- unique(all_trap_species$species)
 glmm_results  <- list()
+
+# run glmm for each species
+# according to RDA, the VegPC3 was not significant and can be removed from the model
+# random effect was initially (1 | site/trap)
+# due to some model convergence issues, could simplify to (1 | trap)
+# alternatively, could make site a fixed effect: site + (1 | trap), but this causes many errors
 
 for (sp in species_list) {
   sp_data <- all_trap_species %>% filter(species == sp)
   if (sum(sp_data$count) < 5) { cat("Skipping", sp, "-- <5 captures\n"); next }
   tryCatch({
     glmm_results[[sp]] <- glmmTMB(
-      count ~ VegPC1 + VegPC2 + VegPC3 + (1 | site/trap),
+      count ~ VegPC1 + VegPC2 + site + (1 | trap),
       data = sp_data, family = nbinom2)
     cat("Abundance model fitted:", sp, "\n")
   }, error = function(e) cat("Failed:", sp, "-", conditionMessage(e), "\n"))
@@ -473,18 +485,44 @@ for (sp in names(glmm_results)) {
 }
 ```
 
+Run them individually outside of the for loop
+```{r}
+all_trap_species %>%
+  group_by(species) %>%
+  summarise(sum(count))
+```
+
+Do not run analyses on less than 5 rodents, so no model for CP or RF; need to complete for all species and check DHARMa results
+
+```{r}
+# create dataframes for each species
+all_trap_species %>% 
+    nest_by(species) %>%  # nest data by the species
+    mutate(data = set_names(list(data), species)) %>% # make a named list
+    pull(data) %>% # extract each data frame
+    list2env(envir = globalenv()) # send to global env
+
+SA_mod <- glmmTMB(count ~ VegPC1 + VegPC2 + (1 | site/trap),
+      data = SA, family = nbinom2)
+summary(SA_mod)
+```
+
+
+The presence_per_trap df is not what I want it to be; only 47 trapping records instead of 60
 ```{r}
 # =============================================================================
 # 5. OCCURRENCE GLMM — Binomial (deduplicated presence data)
 # =============================================================================
 
-presence_per_trap <- expand.grid(
-  trap = unique(rodents_presence$trap), species = unique(rodents_presence$species),
-  stringsAsFactors = FALSE) %>%
-  left_join(veg_with_pcs, by = "trap") %>%
-  left_join(rodents_presence %>% mutate(present=1) %>% select(trap, species, present),
-            by = c("trap","species")) %>%
-  mutate(present = ifelse(is.na(present), 0, present))
+presence_per_trap <- expand.grid(site = unique(veg$site),
+                                 trap = unique(veg$trap), 
+                                 species = unique(rodents$species),
+                                 stringsAsFactors = FALSE) %>%
+  left_join(veg_with_pcs, by = c("site", "trap")) %>%
+  left_join(counts_per_trap %>% select(site, trap, species, count), 
+            by = c("site", "trap", "species")) %>%
+  mutate(count = ifelse(is.na(count), 0, 1)) %>%
+  arrange(species, site, trap)
 
 glmm_bin_results <- list()
 
