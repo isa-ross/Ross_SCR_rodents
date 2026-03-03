@@ -24,7 +24,7 @@ During that discussion with Claude, it seemed like perhaps first analyzing the v
 3.  Ordination plots (base R and ggplot2)
 4.  PERMANOVA: do sites differ in vegetation structure?
 
-## 1. Set Up
+## 1. Set-Up and Data Prep
 
 Load packages
 
@@ -32,18 +32,25 @@ Load packages
 # install.packages(c("vegan", "compositions", "ggplot2", "ggrepel", "dplyr"))
 library(vegan)        # PERMANOVA (adonis2), and multivariate tools
 library(compositions) # CLR transformation
-library(ggplot2)
 library(ggrepel)      # non-overlapping text labels in ggplot2
-library(dplyr)
+library(tidyverse)
+library(glmmTMB)  # have to load before lme4 because lme4 has an outdated version of a package that glmmTMB needs
+library(lme4)
+library(DHARMa)
 ```
 
-Load in the vegetation data
+Load in the data sets
 
 ```{r}
 veg <- read_csv("../veg/veg_clean.csv")
+rodents <- read_csv("../rodent_abundance/scr_clean.csv")
 ```
 
-### 1A. DATA PREP — APPROACH A: Drop one compositional column
+------------------------------------------------------------------------
+
+# Vegetation Analyses
+
+### 1A. Drop one compositional column
 
 Rationale: with 6 ground-layer variables that sum to 100%, one is redundant.
 
@@ -63,7 +70,7 @@ Scale all variables to mean=0, sd=1 before PCA (important because tall-layer var
 veg_dropA_scaled <- scale(veg_dropA)
 ```
 
-### 1B. DATA PREP — APPROACH B: Centered Log-Ratio (CLR) Transformation
+### 1B: Centered Log-Ratio (CLR) Transformation
 
 Rationale: CLR is the statistically principled way to handle compositional data. It log-transforms each proportion relative to the geometric mean of ALL proportions in the composition, removing the sum-to-100 constraint.
 
@@ -142,7 +149,9 @@ var_B <- round(summary(pca_B)$importance[2, 1:3] * 100, 1)
 var_B
 ```
 
-### 3A. ORDINATION PLOTS — BASE R
+## 3. PCA Ordination Plots
+
+### 3A. Base R
 
 Use base R to make plots
 
@@ -174,7 +183,7 @@ for (s in site_levels) {
 }
 ```
 
-### 3B. ORDINATION PLOTS — GGPLOT2
+### 3B. `ggplot2`
 
 This is the same plot, just build with ggplot2
 
@@ -221,7 +230,9 @@ Wow, this is a nice plot!
 # ggsave("ordination_approachB.png", p_B, width = 7, height = 6, dpi = 300)
 ```
 
-### 4. PERMANOVA — Do sites differ significantly in vegetation structure?
+## 4. PERMANOVA
+
+Check if sites differ significantly in vegetation structure?
 
 `adonis2()` from `vegan` tests whether group centroids (and dispersion) differ.
 
@@ -255,7 +266,7 @@ Visualize dispersion
 plot(disp_B, main = "Dispersion")
 ```
 
-### 5. EXTRACTING PC SCORES FOR DOWNSTREAM RODENT ANALYSIS
+## 5. Extract PCA Scores for Rodent Analysis
 
 Save the PC scores to join with your rodent capture data.
 
@@ -269,3 +280,280 @@ head(veg_with_pcs)
 ```
 
 This data frame can be joined to your rodent capture data by 'trap' for use as predictors in GLMMs.
+
+----
+
+# Rodent Analyses
+
+## 6. Prep Rodent Data
+
+Remove "extraneous" rodents AKA those recorded but not caught in a trap
+
+```{r}
+rodents_clean <- rodents %>%
+  filter(is.na(extraneous), yr == 2025, season == "Fall")  # remove extraneous
+  
+```
+
+Prep two different data frame--one with first captures only and one with recaptures included for presence/absence
+
+```{r}
+# A. First captures only — for abundance models
+rodents_first <- rodents_clean %>% filter(is.na(recap))
+
+# B. Deduplicated presence — one row per species*trap, recaps allowed
+rodents_presence <- rodents_clean %>% distinct(site, trap, species)
+```
+
+Add vegetation PCA data to rodent data
+
+```{r}
+rodents_first    <- rodents_first    %>% left_join(veg_with_pcs, by = c("site","trap"))
+rodents_presence <- rodents_presence %>% left_join(veg_with_pcs, by = c("site","trap"))
+```
+
+## 7. Rodent Community Composition using RDA
+
+Prepare data for `rda` function from `vegan`
+
+```{r}
+species_matrix <- rodents_presence %>%
+  mutate(present = 1) %>%
+  pivot_wider(id_cols = site:trap, names_from = species,
+              values_from = present, values_fill = 0) %>%
+  arrange(site, trap)
+
+sp_mat    <- species_matrix %>% select(-site, -trap) %>% as.matrix()
+
+trap_meta <- species_matrix %>% 
+  select(site, trap) %>% 
+  left_join(veg_with_pcs, join_by(site, trap))
+```
+
+Run and assess RDA
+
+```{r}
+# run RDA
+rda_mod <- rda(sp_mat ~ VegPC1 + VegPC2 + VegPC3, data = trap_meta)
+
+# check output
+summary(rda_mod)
+
+# calculate significance and R^2 value
+anova(rda_mod, permutations = 999)                # overall significance
+anova(rda_mod, by = "margin", permutations = 999) # per-term significance
+RsquareAdj(rda_mod)                               # variance explained
+```
+
+## 8. RDA Ordination Plots
+
+Now we plot the rodent RDA data
+
+### 8A. base R
+
+```{r}
+# Base R ordination plot
+# scaling = 2 shows site-level centroids, meaning one point per species per site
+plot(rda_mod, scaling = 2, main = "RDA: Rodent Community ~ Vegetation PCs", type = "n")
+points(rda_mod, display = "sites", col = as.numeric(factor(trap_meta$site)), pch = 19)
+text(rda_mod,   display = "species", col = "red",  cex = 0.8)
+text(rda_mod,   display = "bp",      col = "blue", cex = 0.9)
+legend("topright", legend = levels(factor(trap_meta$site)),
+       col = 1:length(unique(trap_meta$site)), pch = 19, title = "Site")
+
+
+# Use display = "lc" for linear constraints (fitted trap scores)
+# instead of default "wa" (weighted averages, which collapse to centroids)
+plot(rda_mod, scaling = 2, main = "RDA: Rodent Community ~ Vegetation PCs", type = "n")
+points(scores(rda_mod, display = "lc", scaling = 2),
+       col  = as.numeric(factor(trap_meta$site)),
+       pch  = 19, cex = 1.2)
+text(rda_mod, display = "species", col = "red",  cex = 0.8)
+text(rda_mod, display = "bp",      col = "blue", cex = 0.9)
+legend("topright",
+       legend = levels(factor(trap_meta$site)),
+       col    = 1:length(unique(trap_meta$site)),
+       pch    = 19, title = "Site")
+```
+
+### 8B. `ggplot2`
+
+```{r}
+# ggplot2 ordination plot
+rda_sites   <- as.data.frame(scores(rda_mod, display = "sites",   scaling = 2))
+rda_species <- as.data.frame(scores(rda_mod, display = "species", scaling = 2))
+rda_arrows  <- as.data.frame(scores(rda_mod, display = "bp",      scaling = 2))
+rda_sites$site      <- trap_meta$site
+rda_sites$trap      <- trap_meta$trap
+rda_species$species <- rownames(rda_species)
+rda_arrows$variable <- rownames(rda_arrows)
+rda_var <- round(summary(rda_mod)$cont$importance[2, 1:2] * 100, 1)
+
+ggplot() +
+  geom_point(data = rda_sites, aes(RDA1, RDA2, color = site), size = 3, alpha = 0.85) +
+  stat_ellipse(data = rda_sites, aes(RDA1, RDA2, color = site, fill = site),
+               geom = "polygon", alpha = 0.1, level = 0.95, show.legend = FALSE) +
+  geom_text_repel(data = rda_species, aes(RDA1, RDA2, label = species),
+                  color = "red", size = 3) +
+  geom_segment(data = rda_arrows,
+               aes(x=0, y=0, xend=RDA1*1.5, yend=RDA2*1.5),
+               arrow = arrow(length = unit(0.2,"cm")), color = "blue") +
+  geom_text_repel(data = rda_arrows, aes(RDA1*1.5, RDA2*1.5, label = variable),
+                  color = "blue", size = 3.5) +
+  scale_color_manual(values = c("#E41A1C","#377EB8","#4DAF4A")) +
+  scale_fill_manual( values = c("#E41A1C","#377EB8","#4DAF4A")) +
+  labs(title = "Rodent Community ~ Vegetation",
+       x = paste0("RDA1 (", rda_var[1], "%)"),
+       y = paste0("RDA2 (", rda_var[2], "%)"), color = "Site") +
+  coord_equal() + theme_bw(base_size = 12)
+
+
+# To show all traps (might avoid centroid calculation issues--"probable convergence failure")
+rda_sites   <- as.data.frame(scores(rda_mod, display = "lc",   scaling = 2))
+rda_sites$site      <- trap_meta$site
+rda_sites$trap      <- trap_meta$trap
+
+ggplot() +
+  geom_point(data = rda_sites, aes(RDA1, RDA2, color = site), size = 3, alpha = 0.85) +
+  stat_ellipse(data = rda_sites, aes(RDA1, RDA2, color = site, fill = site),
+               geom = "polygon", alpha = 0.1, level = 0.95, show.legend = FALSE) +
+  geom_text_repel(data = rda_species, aes(RDA1, RDA2, label = species),
+                  color = "red", size = 3) +
+  geom_segment(data = rda_arrows,
+               aes(x=0, y=0, xend=RDA1*1.5, yend=RDA2*1.5),
+               arrow = arrow(length = unit(0.2,"cm")), color = "blue") +
+  geom_text_repel(data = rda_arrows, aes(RDA1*1.5, RDA2*1.5, label = variable),
+                  color = "blue", size = 3.5) +
+  scale_color_manual(values = c("#E41A1C","#377EB8","#4DAF4A")) +
+  scale_fill_manual( values = c("#E41A1C","#377EB8","#4DAF4A")) +
+  labs(title = "Rodent Community ~ Vegetation",
+       x = paste0("RDA1 (", rda_var[1], "%)"),
+       y = paste0("RDA2 (", rda_var[2], "%)"), color = "Site") +
+  coord_equal() + theme_bw(base_size = 12)
+```
+
+## 9. Run Generalized Linear Models
+
+###. 9A. GLMM for Abundance Data
+
+```{r}
+counts_per_trap <- rodents_first %>%
+  group_by(site, trap, species, VegPC1, VegPC2, VegPC3) %>%
+  summarise(count = n(), .groups = "drop")
+
+all_trap_species <- expand.grid(site = unique(veg$site),
+                                trap = unique(veg$trap), 
+                                species = unique(rodents$species),
+                                stringsAsFactors = FALSE) %>%
+  left_join(veg_with_pcs, by = c("site", "trap")) %>%
+  left_join(counts_per_trap %>% select(site, trap, species, count), 
+            by = c("site", "trap", "species")) %>%
+  mutate(count = ifelse(is.na(count), 0, count)) %>%
+  arrange(species, site, trap)
+
+species_list  <- unique(all_trap_species$species)
+glmm_results  <- list()
+
+for (sp in species_list) {
+  sp_data <- all_trap_species %>% filter(species == sp)
+  if (sum(sp_data$count) < 5) { cat("Skipping", sp, "-- <5 captures\n"); next }
+  tryCatch({
+    glmm_results[[sp]] <- glmmTMB(
+      count ~ VegPC1 + VegPC2 + VegPC3 + (1 | site/trap),
+      data = sp_data, family = nbinom2)
+    cat("Abundance model fitted:", sp, "\n")
+  }, error = function(e) cat("Failed:", sp, "-", conditionMessage(e), "\n"))
+}
+
+for (sp in names(glmm_results)) { cat("\n===", sp, "===\n"); print(summary(glmm_results[[sp]])) }
+
+# DHARMa diagnostics
+for (sp in names(glmm_results)) {
+  plot(simulateResiduals(glmm_results[[sp]], n=500), main = paste("Abundance —", sp))
+}
+```
+
+```{r}
+# =============================================================================
+# 5. OCCURRENCE GLMM — Binomial (deduplicated presence data)
+# =============================================================================
+
+presence_per_trap <- expand.grid(
+  trap = unique(rodents_presence$trap), species = unique(rodents_presence$species),
+  stringsAsFactors = FALSE) %>%
+  left_join(veg_with_pcs, by = "trap") %>%
+  left_join(rodents_presence %>% mutate(present=1) %>% select(trap, species, present),
+            by = c("trap","species")) %>%
+  mutate(present = ifelse(is.na(present), 0, present))
+
+glmm_bin_results <- list()
+
+for (sp in species_list) {
+  sp_data <- presence_per_trap %>% filter(species == sp)
+  if (sum(sp_data$present) < 5) { cat("Skipping", sp, "-- <5 traps\n"); next }
+  tryCatch({
+    glmm_bin_results[[sp]] <- glmer(
+      present ~ VegPC1 + VegPC2 + VegPC3 + (1 | site/trap),
+      data = sp_data, family = binomial)
+    cat("Occurrence model fitted:", sp, "\n")
+  }, error = function(e) cat("Failed:", sp, "-", conditionMessage(e), "\n"))
+}
+
+for (sp in names(glmm_bin_results)) { cat("\n===", sp, "===\n"); print(summary(glmm_bin_results[[sp]])) }
+
+for (sp in names(glmm_bin_results)) {
+  plot(simulateResiduals(glmm_bin_results[[sp]], n=500), main = paste("Occurrence —", sp))
+}
+
+# =============================================================================
+# 6. COEFFICIENT PLOTS
+# =============================================================================
+
+extract_coefs <- function(model_list, model_type) {
+  lapply(names(model_list), function(sp) {
+    mod <- model_list[[sp]]
+    cf  <- as.data.frame(confint(mod, method = "Wald"))
+    cf  <- cf[grep("VegPC", rownames(cf)), ]
+    cf$species    <- sp
+    cf$term       <- rownames(cf)
+    cf$model_type <- model_type
+    cf$estimate   <- if (inherits(mod, "glmmTMB")) {
+      fixef(mod)$cond[grep("VegPC", names(fixef(mod)$cond))]
+    } else { fixef(mod)[grep("VegPC", names(fixef(mod)))] }
+    cf
+  }) %>% bind_rows()
+}
+
+all_coefs <- bind_rows(
+  extract_coefs(glmm_results,     "Abundance (NegBin)"),
+  extract_coefs(glmm_bin_results, "Occurrence (Binomial)")
+)
+colnames(all_coefs)[1:2] <- c("lower", "upper")
+
+# ggplot2 coefficient plot
+ggplot(all_coefs, aes(x = estimate, y = species, color = model_type)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_errorbarh(aes(xmin = lower, xmax = upper), height = 0.2, linewidth = 0.8) +
+  geom_point(size = 3) +
+  facet_wrap(~ term, scales = "free_x") +
+  scale_color_manual(values = c("#E41A1C","#377EB8")) +
+  labs(title = "GLMM Coefficients: Vegetation Effects on Rodents",
+       x = "Estimate (95% CI)", y = "Species", color = "Model") +
+  theme_bw(base_size = 12)
+
+# Base R coefficient plot (one per PC)
+for (pc_term in c("VegPC1","VegPC2","VegPC3")) {
+  sub <- all_coefs %>% filter(grepl(pc_term, term))
+  n   <- nrow(sub)
+  par(mar = c(4, 12, 3, 2))
+  plot(sub$estimate, 1:n, xlim = range(c(sub$lower, sub$upper), na.rm=TRUE),
+       yaxt="n", xlab="Estimate (95% CI)",
+       main = paste("Effect of", pc_term), pch=19,
+       col = ifelse(sub$model_type == "Abundance (NegBin)", "#E41A1C", "#377EB8"))
+  abline(v=0, lty=2, col="gray50")
+  segments(sub$lower, 1:n, sub$upper, 1:n,
+           col = ifelse(sub$model_type == "Abundance (NegBin)", "#E41A1C", "#377EB8"))
+  axis(2, at=1:n, labels=paste0(sub$species," (",sub$model_type,")"), las=2, cex.axis=0.75)
+}
+```
+
