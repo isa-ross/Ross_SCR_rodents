@@ -478,7 +478,7 @@ for (sp in species_list) {
   if (sum(sp_data$count) < 5) { cat("Skipping", sp, "-- <5 captures\n"); next }
   tryCatch({
     glmm_results[[sp]] <- glmmTMB(
-      count ~ VegPC1 + VegPC2 + site + (1 | trap),
+      count ~ VegPC1 + VegPC2,
       data = sp_data, family = nbinom2)
     cat("Abundance model fitted:", sp, "\n")
   }, error = function(e) cat("Failed:", sp, "-", conditionMessage(e), "\n"))
@@ -510,7 +510,7 @@ all_trap_species %>%
     pull(data) %>% # extract each data frame
     list2env(envir = globalenv()) # send to global env
 
-SA_mod <- glmmTMB(count ~ VegPC1 + VegPC2 + (1 | site/trap),
+SA_mod <- glmmTMB(count ~ VegPC1 + VegPC2),
       data = SA, family = nbinom2)
 summary(SA_mod)
 ```
@@ -538,12 +538,12 @@ for (sp in species_list) {
   sp_data <- presence_per_trap %>% filter(species == sp)
   if (sum(sp_data$count) < 5) { cat("Skipping", sp, "-- <5 traps\n"); next }
   tryCatch({
-    glmm_bin_results[[sp]] <- glmer(
-      count ~ VegPC1 + VegPC2 + VegPC3 + (1 | site/trap),
+    glmm_bin_results[[sp]] <- glm(
+      count ~ VegPC1 + VegPC2,
       data = sp_data, family = binomial)
     cat("Occurrence model fitted:", sp, "\n")
   }, error = function(e) cat("Failed:", sp, "-", conditionMessage(e), "\n"))
-  }
+}
 
 for (sp in names(glmm_bin_results)) { cat("\n===", sp, "===\n"); print(summary(glmm_bin_results[[sp]])) }
 
@@ -564,14 +564,14 @@ extract_coefs <- function(model_list, model_type) {
     cf$term       <- rownames(cf)
     cf$model_type <- model_type
     cf$estimate   <- if (inherits(mod, "glmmTMB")) {
-      fixef(mod)$cond[grep("VegPC", names(fixef(mod)$cond))]
-    } else { fixef(mod)[grep("VegPC", names(fixef(mod)))] }
+      coef(mod)$cond[grep("VegPC", names(coef(mod)$cond))]
+    } else { coef(mod)[grep("VegPC", names(coef(mod)))] }
     cf
   }) %>% bind_rows()
 }
 
 all_coefs <- bind_rows(
-  extract_coefs(glmm_results,     "Abundance (NegBin)"),
+  #extract_coefs(glmm_results,     "Abundance (NegBin)"),
   extract_coefs(glmm_bin_results, "Occurrence (Binomial)")
 )
 colnames(all_coefs)[1:2] <- c("lower", "upper")
