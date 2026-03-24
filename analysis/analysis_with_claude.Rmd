@@ -220,6 +220,8 @@ plot_pca_gg <- function(scores_df, var_explained, title_str) {
 p_B <- plot_pca_gg(scores_B, var_B, "PCA Ordination")
 
 print(p_B)
+
+ggsave("../outputs/vegpca.png", p_B)
 ```
 
 Wow, this is a nice plot!
@@ -281,7 +283,7 @@ head(veg_with_pcs)
 
 This data frame can be joined to your rodent capture data by 'trap' for use as predictors in GLMMs.
 
-----
+------------------------------------------------------------------------
 
 # Rodent Analyses
 
@@ -342,6 +344,7 @@ summary(rda_mod)
 # calculate significance and R^2 value
 anova(rda_mod, permutations = 999)                # overall significance
 anova(rda_mod, by = "margin", permutations = 999) # per-term significance
+                                                  # VegPC3 not significant - drop
 RsquareAdj(rda_mod)                               # variance explained
 ```
 
@@ -379,6 +382,7 @@ legend("topright",
 ### 8B. `ggplot2`
 
 Ordination plot using ggplot2 with one point per species per site. The `stat_ellipse()` function is the sources of the "probable convergence failure" errors.
+
 ```{r}
 # ggplot2 ordination plot
 rda_sites   <- as.data.frame(scores(rda_mod, display = "sites",   scaling = 2))
@@ -409,7 +413,8 @@ ggplot() +
   coord_equal() + theme_bw(base_size = 12)
 ```
 
-Same plot but with one point per trap instead. This removes the "probably convergence failure" warnings from the 
+Same plot but with one point per trap instead. This removes the "probably convergence failure" warnings from the
+
 ```{r}
 # To show all traps (might avoid centroid calculation issues--"probable convergence failure")
 rda_sites   <- as.data.frame(scores(rda_mod, display = "lc",   scaling = 2))
@@ -433,9 +438,11 @@ ggplot() +
        x = paste0("RDA1 (", rda_var[1], "%)"),
        y = paste0("RDA2 (", rda_var[2], "%)"), color = "Site") +
   coord_equal() + theme_bw(base_size = 12)
+
+ggsave("../outputs/rda_by_trap.png")
 ```
 
-## 9. Run Generalized Linear Models
+d77889090-p-000000000000-=---0## 9. Run Generalized Linear Models
 
 ### 9A. GLMM for Abundance Data
 
@@ -486,6 +493,7 @@ for (sp in names(glmm_results)) {
 ```
 
 Run them individually outside of the for loop
+
 ```{r}
 all_trap_species %>%
   group_by(species) %>%
@@ -507,8 +515,8 @@ SA_mod <- glmmTMB(count ~ VegPC1 + VegPC2 + (1 | site/trap),
 summary(SA_mod)
 ```
 
-
 The presence_per_trap df is not what I want it to be; only 47 trapping records instead of 60
+
 ```{r}
 # =============================================================================
 # 5. OCCURRENCE GLMM — Binomial (deduplicated presence data)
@@ -528,14 +536,14 @@ glmm_bin_results <- list()
 
 for (sp in species_list) {
   sp_data <- presence_per_trap %>% filter(species == sp)
-  if (sum(sp_data$present) < 5) { cat("Skipping", sp, "-- <5 traps\n"); next }
+  if (sum(sp_data$count) < 5) { cat("Skipping", sp, "-- <5 traps\n"); next }
   tryCatch({
     glmm_bin_results[[sp]] <- glmer(
-      present ~ VegPC1 + VegPC2 + VegPC3 + (1 | site/trap),
+      count ~ VegPC1 + VegPC2 + VegPC3 + (1 | site/trap),
       data = sp_data, family = binomial)
     cat("Occurrence model fitted:", sp, "\n")
   }, error = function(e) cat("Failed:", sp, "-", conditionMessage(e), "\n"))
-}
+  }
 
 for (sp in names(glmm_bin_results)) { cat("\n===", sp, "===\n"); print(summary(glmm_bin_results[[sp]])) }
 
@@ -594,4 +602,3 @@ for (pc_term in c("VegPC1","VegPC2","VegPC3")) {
   axis(2, at=1:n, labels=paste0(sub$species," (",sub$model_type,")"), las=2, cex.axis=0.75)
 }
 ```
-
