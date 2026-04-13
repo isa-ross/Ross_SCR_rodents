@@ -335,7 +335,7 @@ Run and assess RDA
 
 ```{r}
 # run RDA
-rda_mod <- rda(sp_mat ~ VegPC1 + VegPC2 + VegPC3, data = trap_meta)
+rda_mod <- rda(sp_mat ~ VegPC1 + VegPC2, data = trap_meta)
 
 # check output
 summary(rda_mod)
