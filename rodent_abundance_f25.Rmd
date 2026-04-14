@@ -1,0 +1,105 @@
+---
+title: "rodent_analysis_fall25"
+author: "Isa Ross"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+library(tidyverse)
+install.packages("patchwork")
+library(patchwork)
+```
+
+## Load Data
+
+```{r}
+capture <- read_csv("rodent_abundance/scr_clean.csv")
+
+# remove extraneous species
+sp_richness_f25 <- capture %>% filter(is.na(extraneous), season == "Fall", yr == 2025)
+
+# create list of unique species
+sp_list_f25 <- sp_richness_f25 %>% distinct(species)
+
+# count unique species
+sp_count_f25 <- count(sp_list_f25)
+
+# Site Specific
+# list of species per site
+site_sp_list_f25 <- sp_richness_f25 %>% 
+  group_by(site) %>% 
+  distinct(species)
+
+# count species per site
+site_sp_count_f25 <- site_sp_list_f25 %>% 
+  group_by(site) %>% 
+  summarise(n_species = n())
+
+ggplot(site_sp_count_f25, aes(x = site, y = n_species, fill = site))+
+  geom_col()+
+  ylab("Species Richness")+
+  theme_bw() + 
+  scale_fill_viridis_d(end = 0.95) 
+
+ggsave("outputs/site_sp_richness_f25.png", width=4, height=4)
+```
+
+```{r}
+sp_abund_f25 <- sp_richness_f25 %>% filter(is.na(recap)) #remove recaps
+
+## plot
+#abund_by_site_period <- abund_by_site_period %>% mutate(total = sum(abund_by_site_period$n_species))
+
+abund <- ggplot(sp_abund_f25, aes(x=site))+
+  geom_bar(aes(fill = species), position = "stack")+
+  geom_text(stat = "count", aes(label = ..count..), vjust = -1)+
+  ylim(NA, 37)+
+  theme_bw()+
+  theme(legend.position = "none")+
+  scale_fill_viridis_d(option = "plasma", direction = -1, end = 0.8, begin = 0.15)+
+  labs(y = "Abundance", x = "Site", fill = "Species")
+
+ggsave("outputs/abund_f25.png", width=8, height=4)
+```
+
+```{r}
+rel_abund_f25 <- sp_abund_f25 %>% group_by(site, species) %>% 
+  count() %>% 
+  ungroup(species) %>% 
+  mutate(site_abund = sum(n)) %>% 
+  mutate(rel_abund = n/site_abund)
+
+rel_abund <- ggplot(rel_abund_f25, aes(x = site, y = rel_abund)) +
+  geom_col(aes(fill = species), position = "stack")+
+  theme_bw()+
+  scale_fill_viridis_d(option = "plasma", direction = -1, end = 0.8, begin = 0.15)+
+  labs(y = "Relative Abundance", x = "Site", fill = "Species")
+
+ggsave("outputs/rel_abund_f25.png", width=8, height=4)
+
+```
+
+```{r}
+abund + rel_abund +
+  plot_annotation(tag_levels = "A")
+
+ggsave("outputs/abund+rel_abund.png", width=8, height=4)
+```
+
+```{r}
+shannon_site <- rel_abund_f25 %>% mutate(proportion = rel_abund*log(rel_abund)) %>% 
+  summarise(shannon_index = sum(proportion)) %>% 
+  mutate(shannon_index = shannon_index*-1)
+```
+

@@ -68,4 +68,7 @@ ggplot(abund_by_site_period, aes(x=as.factor(yr), y=n))+
 
 ggsave("outputs/site_season_abund.png", width=8, height=4)
 
+
+## Species Richness in Fall 2025 ONLY
+
   
